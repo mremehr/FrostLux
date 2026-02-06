@@ -1,0 +1,27 @@
+# FrostLux Configuration
+# Edit this file to customize FrostLux behavior.
+
+[gateway]
+# Tradfri gateway IP address
+host = "192.168.0.131"
+# DTLS identity (from gateway pairing)
+identity = ""
+# Pre-shared key
+psk = ""
+
+[ui]
+# Theme mode: "auto", "light", "dark"
+theme = "auto"
+# How often to refresh light status (seconds)
+refresh_interval = 5
+
+[scenes]
+# Light names to exclude from all scene commands.
+# These lights won't be affected when you apply any scene.
+# Example: exclude = ["Sovrummet", "Barnrummet"]
+exclude = []
+
+# Exclude lights for specific scenes only.
+# Scene keys: on, off, movie, bright, cozy, night, evening, reading, morning
+# Example: exclude_by_scene = { movie = ["TV-lampa"], night = ["Kök"] }
+exclude_by_scene = {}
