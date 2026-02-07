@@ -2,6 +2,7 @@
 name = "frostlux"
 version = "0.2.0"
 edition = "2021"
+authors = ["Mattias <mattias@frostlux.dev>", "Claude <noreply@anthropic.com>"]
 description = "TUI controller for IKEA Tradfri smart lights"
 license = "GPL-2.0"
 
