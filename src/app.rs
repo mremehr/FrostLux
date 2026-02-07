@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::time::Instant;
 
 use crate::coap::SharedTradfriClient;
@@ -155,6 +157,15 @@ pub fn load_config() -> Result<Config> {
                 .with_context(|| format!("Failed to read {}", path.display()))?;
             let config: Config = toml::from_str(&content)
                 .with_context(|| format!("Failed to parse {}", path.display()))?;
+
+            if !config.gateway.host.is_empty() {
+                config
+                    .gateway
+                    .host
+                    .parse::<IpAddr>()
+                    .with_context(|| format!("Invalid gateway IP: '{}'", config.gateway.host))?;
+            }
+
             return Ok(config);
         }
     }
@@ -286,6 +297,8 @@ pub struct App {
     pub status_msg: Option<(String, Instant)>,
     pub last_refresh: Instant,
     pub show_help: bool,
+    refresh_tx: mpsc::Sender<Vec<Light>>,
+    refresh_rx: mpsc::Receiver<Vec<Light>>,
 }
 
 impl App {
@@ -296,6 +309,8 @@ impl App {
             &config.gateway.psk,
         ).context("Failed to connect to Trådfri gateway")?;
 
+        let (refresh_tx, refresh_rx) = mpsc::channel();
+
         Ok(Self {
             config,
             client,
@@ -305,6 +320,8 @@ impl App {
             status_msg: None,
             last_refresh: Instant::now() - std::time::Duration::from_secs(999),
             show_help: false,
+            refresh_tx,
+            refresh_rx,
         })
     }
 
@@ -338,6 +355,28 @@ impl App {
         }
         self.last_refresh = Instant::now();
         Ok(())
+    }
+
+    /// Start a non-blocking refresh in a background thread.
+    pub fn start_background_refresh(&mut self) {
+        self.last_refresh = Instant::now();
+        let client = self.client.clone();
+        let tx = self.refresh_tx.clone();
+        std::thread::spawn(move || {
+            if let Ok(lights) = tradfri::fetch_lights(&client) {
+                let _ = tx.send(lights);
+            }
+        });
+    }
+
+    /// Poll for completed background refresh results.
+    pub fn poll_refresh(&mut self) {
+        if let Ok(lights) = self.refresh_rx.try_recv() {
+            self.lights = lights;
+            if self.selected >= self.lights.len() {
+                self.selected = self.lights.len().saturating_sub(1);
+            }
+        }
     }
 
     pub fn toggle_selected(&mut self) -> Result<()> {

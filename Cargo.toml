@@ -21,3 +21,5 @@ coap-lite = "0.13"
 [profile.release]
 lto = true
 strip = true
+codegen-units = 1
+panic = "abort"

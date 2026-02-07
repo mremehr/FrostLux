@@ -84,16 +84,19 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     }
 
     loop {
-        // Auto-refresh (blocking for now)
+        // Poll for completed background refresh
+        app.poll_refresh();
+
+        // Start background refresh when interval has elapsed
         if app.last_refresh.elapsed() >= refresh_interval {
-            let _ = app.refresh_lights();
+            app.start_background_refresh();
         }
+
         // Auto theme detection refresh
         if theme_auto && last_theme_check.elapsed() >= Duration::from_secs(2) {
             theme = frost_theme_from_config(&app.config.ui.theme);
             last_theme_check = Instant::now();
         }
-
 
         // Draw
         terminal.draw(|f| ui::draw(f, app, &theme))?;

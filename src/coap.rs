@@ -369,20 +369,26 @@ impl SharedTradfriClient {
         })
     }
 
+    fn lock_client(&self) -> Result<std::sync::MutexGuard<'_, TradfriClient>> {
+        self.inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Gateway client lock poisoned"))
+    }
+
     pub fn list_lights(&self) -> Result<Vec<LightInfo>> {
-        self.inner.lock().unwrap().list_lights()
+        self.lock_client()?.list_lights()
     }
 
     pub fn set_power(&self, id: u64, on: bool) -> Result<()> {
-        self.inner.lock().unwrap().set_power(id, on)
+        self.lock_client()?.set_power(id, on)
     }
 
     pub fn set_brightness(&self, id: u64, brightness: u8) -> Result<()> {
-        self.inner.lock().unwrap().set_brightness(id, brightness)
+        self.lock_client()?.set_brightness(id, brightness)
     }
 
     pub fn set_color(&self, id: u64, hex: &str) -> Result<()> {
-        self.inner.lock().unwrap().set_color(id, hex)
+        self.lock_client()?.set_color(id, hex)
     }
 
     pub fn apply_scene_to_light(
@@ -392,9 +398,7 @@ impl SharedTradfriClient {
         brightness: u8,
         color_hex: &str,
     ) -> Result<()> {
-        self.inner
-            .lock()
-            .unwrap()
+        self.lock_client()?
             .apply_scene_to_light(id, on, brightness, color_hex)
     }
 }
