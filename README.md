@@ -8,7 +8,7 @@ TUI controller for IKEA Tradfri smart lights. Built with Rust, ratatui, and the 
 - **9 scenes** — on, off, movie, bright, cozy, night, evening, reading, morning
 - **Headless mode** — apply scenes from the command line without opening the TUI
 - **Per-scene exclusions** — skip specific lights for specific scenes
-- **Auto theme** — detects terminal light/dark mode (Ghostty, Alacritty, xterm)
+- **Auto theme + live sync** — detects terminal light/dark mode and updates in real time while running
 - **Persistent DTLS** — single connection with auto-reconnect for fast responses
 - **Optimistic UI** — instant feedback, network calls run in background
 
@@ -123,12 +123,23 @@ night = ["Koket"]
 When `theme = "auto"`, FrostLux detects your terminal theme via:
 
 1. `FROSTLUX_THEME` env var
-2. `COLORFGBG` (xterm/rxvt/Ghostty)
-3. Ghostty config
-4. Alacritty marker file / config header
-5. `ALACRITTY_THEME` / `GHOSTTY_THEME` env vars
+2. Alacritty marker file: `~/.config/alacritty/.current-theme` (primary dynamic source)
+3. `COLORFGBG` (xterm/rxvt/Ghostty)
+4. Ghostty config
+5. Alacritty config header
+6. `ALACRITTY_THEME` / `GHOSTTY_THEME` env vars
 
 Themes: **Deep Cracked Ice** (dark) and **Frostglow** (light).
+
+### Real-Time Theme Updates
+
+When `theme = "auto"`, FrostLux tracks changes to `~/.config/alacritty/.current-theme`
+while the TUI is open and switches theme immediately. This is designed to work with
+keybindings/scripts such as:
+
+```sh
+~/.local/bin/alacritty-switch-theme.sh toggle
+```
 
 ## License
 

@@ -16,7 +16,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use app::{load_config, App, Scene};
-use ui::frost_theme_from_config;
+use ui::{alacritty_marker_theme_is_light, frost_theme_from_config};
 
 fn main() -> Result<()> {
     // Parse CLI args
@@ -76,6 +76,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     let mut theme = frost_theme_from_config(&app.config.ui.theme);
     let mut last_theme_check = Instant::now();
     let theme_auto = app.config.ui.theme.eq_ignore_ascii_case("auto");
+    let mut last_marker_theme = alacritty_marker_theme_is_light();
+
+    if theme_auto {
+        if let Some(is_light) = last_marker_theme {
+            theme = frost_theme_from_config(if is_light { "light" } else { "dark" });
+        }
+    }
 
     // Initial fetch (blocking but necessary)
     app.set_status("Connecting to gateway...");
@@ -92,10 +99,25 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             app.start_background_refresh();
         }
 
-        // Auto theme detection refresh
-        if theme_auto && last_theme_check.elapsed() >= Duration::from_secs(2) {
-            theme = frost_theme_from_config(&app.config.ui.theme);
-            last_theme_check = Instant::now();
+        // Auto theme refresh:
+        // - Fast path: react to Alacritty marker changes in near real-time.
+        // - Fallback: periodic auto detection when marker file is missing.
+        if theme_auto {
+            let marker_theme = alacritty_marker_theme_is_light();
+
+            if marker_theme != last_marker_theme {
+                if let Some(is_light) = marker_theme {
+                    theme = frost_theme_from_config(if is_light { "light" } else { "dark" });
+                } else {
+                    theme = frost_theme_from_config(&app.config.ui.theme);
+                }
+                last_marker_theme = marker_theme;
+            }
+
+            if marker_theme.is_none() && last_theme_check.elapsed() >= Duration::from_millis(750) {
+                theme = frost_theme_from_config(&app.config.ui.theme);
+                last_theme_check = Instant::now();
+            }
         }
 
         // Draw
