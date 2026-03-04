@@ -267,6 +267,10 @@ impl TradfriClient {
         Ok(Self { coap })
     }
 
+    fn from_coap(coap: DtlsCoap) -> Self {
+        Self { coap }
+    }
+
     /// List all lights from the gateway
     pub fn list_lights(&mut self) -> Result<Vec<LightInfo>> {
         // Get device IDs
@@ -401,69 +405,80 @@ impl SharedTradfriClient {
     }
 }
 
-/// Fetch all lights in parallel using a pool of DTLS connections.
+/// Connect to the gateway, fetch all lights in parallel, and return both the
+/// light list and a ready-to-use persistent client — all in one operation.
 ///
-/// Step 1: one connection fetches the full device ID list.
-/// Step 2: IDs are split across up to PARALLEL_POOL_SIZE worker threads,
-///         each with its own DTLS connection, fetching concurrently.
-pub fn fetch_lights_parallel(host: &str, identity: &str, psk: &str) -> Result<Vec<LightInfo>> {
-    // Get device ID list with a single short-lived connection.
-    let ids: Vec<u64> = {
-        let mut primary = DtlsCoap::new(host, identity, psk)
-            .context("Failed to connect to Trådfri gateway")?;
-        let payload = primary.get("15001")?;
-        serde_json::from_slice(&payload).context("Failed to parse device ID list")?
+/// Step 1: primary connection fetches the device ID list.
+/// Step 2: IDs are split across up to PARALLEL_POOL_SIZE worker threads.
+/// Step 3: the primary connection is reused as the persistent client,
+///         saving one DTLS handshake compared to opening a fresh connection.
+pub fn connect_and_fetch_lights(
+    host: &str,
+    identity: &str,
+    psk: &str,
+) -> Result<(Vec<LightInfo>, SharedTradfriClient)> {
+    // Step 1: primary connection — becomes the persistent client after fetching IDs.
+    let mut primary = DtlsCoap::new(host, identity, psk)
+        .context("Failed to connect to Trådfri gateway")?;
+    let payload = primary.get("15001")?;
+    let ids: Vec<u64> = serde_json::from_slice(&payload)
+        .context("Failed to parse device ID list")?;
+
+    // Step 2: parallel workers fetch each device's details.
+    let lights = if ids.is_empty() {
+        Vec::new()
+    } else {
+        let pool_size = PARALLEL_POOL_SIZE.min(ids.len());
+        let chunk_size = ids.len().div_ceil(pool_size);
+        let chunks: Vec<Vec<u64>> = ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
+
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<LightInfo>>();
+
+        for chunk in chunks {
+            let tx = tx.clone();
+            let host = host.to_string();
+            let identity = identity.to_string();
+            let psk = psk.to_string();
+
+            std::thread::spawn(move || {
+                let mut batch = Vec::new();
+                if let Ok(mut conn) = DtlsCoap::new(&host, &identity, &psk) {
+                    for id in chunk {
+                        let Ok(payload) = conn.get(&format!("15001/{}", id)) else {
+                            continue;
+                        };
+                        let Ok(device) = serde_json::from_slice::<TradfriDevice>(&payload) else {
+                            continue;
+                        };
+                        let Some(bulb) = device.bulbs.as_ref().and_then(|b| b.first()) else {
+                            continue;
+                        };
+                        batch.push(LightInfo {
+                            id: device.id,
+                            name: device.name,
+                            on: bulb.on.unwrap_or(0) == 1,
+                            brightness: bulb.brightness.unwrap_or(0),
+                            color_hex: bulb.color_hex.clone(),
+                            reachable: device.reachable.unwrap_or(0) == 1,
+                        });
+                    }
+                }
+                let _ = tx.send(batch);
+            });
+        }
+
+        drop(tx);
+        let mut lights = Vec::new();
+        while let Ok(batch) = rx.recv() {
+            lights.extend(batch);
+        }
+        lights
     };
 
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
+    // Step 3: wrap the primary connection as the persistent client — no extra handshake.
+    let client = SharedTradfriClient {
+        inner: Arc::new(Mutex::new(TradfriClient::from_coap(primary))),
+    };
 
-    let pool_size = PARALLEL_POOL_SIZE.min(ids.len());
-    let chunk_size = ids.len().div_ceil(pool_size);
-    let chunks: Vec<Vec<u64>> = ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
-
-    let (tx, rx) = std::sync::mpsc::channel::<Vec<LightInfo>>();
-
-    for chunk in chunks {
-        let tx = tx.clone();
-        let host = host.to_string();
-        let identity = identity.to_string();
-        let psk = psk.to_string();
-
-        std::thread::spawn(move || {
-            let mut batch = Vec::new();
-            if let Ok(mut conn) = DtlsCoap::new(&host, &identity, &psk) {
-                for id in chunk {
-                    let Ok(payload) = conn.get(&format!("15001/{}", id)) else {
-                        continue;
-                    };
-                    let Ok(device) = serde_json::from_slice::<TradfriDevice>(&payload) else {
-                        continue;
-                    };
-                    let Some(bulb) = device.bulbs.as_ref().and_then(|b| b.first()) else {
-                        continue;
-                    };
-                    batch.push(LightInfo {
-                        id: device.id,
-                        name: device.name,
-                        on: bulb.on.unwrap_or(0) == 1,
-                        brightness: bulb.brightness.unwrap_or(0),
-                        color_hex: bulb.color_hex.clone(),
-                        reachable: device.reachable.unwrap_or(0) == 1,
-                    });
-                }
-            }
-            let _ = tx.send(batch);
-        });
-    }
-
-    // Drop original sender so the channel closes when all workers finish.
-    drop(tx);
-
-    let mut lights = Vec::new();
-    while let Ok(batch) = rx.recv() {
-        lights.extend(batch);
-    }
-    Ok(lights)
+    Ok((lights, client))
 }

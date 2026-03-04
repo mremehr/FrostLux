@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use crate::coap::SharedTradfriClient;
+use crate::coap::{self, SharedTradfriClient};
 use crate::tradfri::{self, Light, COLOR_TEMP_COLD, COLOR_TEMP_NEUTRAL, COLOR_TEMPS, COLOR_TEMP_LABELS};
 
 const CONFIG_FILENAME: &str = "config.toml";
@@ -322,16 +322,12 @@ impl App {
         let psk = config.gateway.psk.clone();
 
         std::thread::spawn(move || {
-            match tradfri::fetch_lights_fast(&host, &identity, &psk) {
-                Ok(lights) => {
-                    match SharedTradfriClient::new(&host, &identity, &psk) {
-                        Ok(client) => {
-                            let _ = startup_tx.send(StartupResult::Connected { client, lights });
-                        }
-                        Err(e) => {
-                            let _ = startup_tx.send(StartupResult::Failed(e.to_string()));
-                        }
-                    }
+            // One operation: connect, fetch lights in parallel, reuse connection as client.
+            match coap::connect_and_fetch_lights(&host, &identity, &psk) {
+                Ok((infos, client)) => {
+                    let mut lights: Vec<Light> = infos.into_iter().map(Light::from).collect();
+                    lights.sort_by(|a, b| a.name.cmp(&b.name));
+                    let _ = startup_tx.send(StartupResult::Connected { client, lights });
                 }
                 Err(e) => {
                     let _ = startup_tx.send(StartupResult::Failed(e.to_string()));
