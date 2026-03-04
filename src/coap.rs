@@ -203,21 +203,18 @@ impl DtlsCoap {
 
         let response = self.request(request.message)?;
 
-        match response.header.code {
-            MessageClass::Response(ref code) => {
-                use coap_lite::ResponseType::*;
-                match code {
-                    Content | Created | Changed | Deleted | Valid => {}
-                    _ => {
-                        anyhow::bail!(
-                            "CoAP error {:?}: {}",
-                            code,
-                            String::from_utf8_lossy(&response.payload)
-                        );
-                    }
+        if let MessageClass::Response(ref code) = response.header.code {
+            use coap_lite::ResponseType::*;
+            match code {
+                Content | Created | Changed | Deleted | Valid => {}
+                _ => {
+                    anyhow::bail!(
+                        "CoAP error {:?}: {}",
+                        code,
+                        String::from_utf8_lossy(&response.payload)
+                    );
                 }
             }
-            _ => {}
         }
 
         Ok(response.payload)
@@ -423,7 +420,7 @@ pub fn fetch_lights_parallel(host: &str, identity: &str, psk: &str) -> Result<Ve
     }
 
     let pool_size = PARALLEL_POOL_SIZE.min(ids.len());
-    let chunk_size = (ids.len() + pool_size - 1) / pool_size;
+    let chunk_size = ids.len().div_ceil(pool_size);
     let chunks: Vec<Vec<u64>> = ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
 
     let (tx, rx) = std::sync::mpsc::channel::<Vec<LightInfo>>();

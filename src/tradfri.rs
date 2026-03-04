@@ -1,6 +1,15 @@
 use crate::coap::{LightInfo, SharedTradfriClient};
 use anyhow::Result;
 
+/// Trådfri standard color temperature hex values (cold → neutral → warm).
+pub const COLOR_TEMP_COLD: &str = "f5faf6";
+pub const COLOR_TEMP_NEUTRAL: &str = "f1e0b5";
+pub const COLOR_TEMP_WARM: &str = "efd275";
+
+/// Ordered cold → warm, for cycling.
+pub const COLOR_TEMPS: [&str; 3] = [COLOR_TEMP_COLD, COLOR_TEMP_NEUTRAL, COLOR_TEMP_WARM];
+pub const COLOR_TEMP_LABELS: [&str; 3] = ["cold", "neutral", "warm"];
+
 /// Light representation for the TUI
 #[derive(Debug, Clone)]
 pub struct Light {
@@ -36,9 +45,9 @@ impl Light {
     /// Color temperature label based on hex.
     pub fn color_temp_label(&self) -> &str {
         match self.color_hex.as_deref() {
-            Some("f5faf6") => "cold",
-            Some("f1e0b5") => "neutral",
-            Some("efd275") => "warm",
+            Some(COLOR_TEMP_COLD) => "cold",
+            Some(COLOR_TEMP_NEUTRAL) => "neutral",
+            Some(COLOR_TEMP_WARM) => "warm",
             Some(h) if h.starts_with("f5") => "cold",
             Some(h) if h.starts_with("efd") => "warm",
             Some(_) => "neutral",

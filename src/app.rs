@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use crate::coap::SharedTradfriClient;
-use crate::tradfri::{self, Light};
+use crate::tradfri::{self, Light, COLOR_TEMP_COLD, COLOR_TEMP_NEUTRAL, COLOR_TEMPS, COLOR_TEMP_LABELS};
 
 const CONFIG_FILENAME: &str = "config.toml";
 
@@ -248,15 +248,15 @@ impl Scene {
     /// Returns (on, brightness 0-254, color_hex).
     pub fn settings(&self) -> (bool, u8, &str) {
         match self {
-            Scene::AllOn      => (true,  254, "f5faf6"),
-            Scene::AllOff     => (false, 0,   "f5faf6"),
-            Scene::Movie      => (true,  30,  "f1e0b5"),
-            Scene::Bright     => (true,  254, "f5faf6"),
-            Scene::Cozy       => (true,  127, "f1e0b5"),
-            Scene::Night      => (true,  15,  "f1e0b5"),
-            Scene::Evening    => (true,  150, "f1e0b5"),
-            Scene::Reading    => (true,  200, "f5faf6"),
-            Scene::GoodMorning => (true, 180, "f5faf6"),
+            Scene::AllOn       => (true,  254, COLOR_TEMP_COLD),
+            Scene::AllOff      => (false, 0,   COLOR_TEMP_COLD),
+            Scene::Movie       => (true,  30,  COLOR_TEMP_NEUTRAL),
+            Scene::Bright      => (true,  254, COLOR_TEMP_COLD),
+            Scene::Cozy        => (true,  127, COLOR_TEMP_NEUTRAL),
+            Scene::Night       => (true,  15,  COLOR_TEMP_NEUTRAL),
+            Scene::Evening     => (true,  150, COLOR_TEMP_NEUTRAL),
+            Scene::Reading     => (true,  200, COLOR_TEMP_COLD),
+            Scene::GoodMorning => (true,  180, COLOR_TEMP_COLD),
         }
     }
 
@@ -470,8 +470,8 @@ impl App {
             return Ok(());
         };
         if let Some(light) = self.lights.get(self.selected).cloned() {
-            let temps = ["f5faf6", "f1e0b5", "efd275"];
-            let labels = ["cold", "neutral", "warm"];
+            let temps = COLOR_TEMPS;
+            let labels = COLOR_TEMP_LABELS;
             let current_idx = temps.iter().position(|&h| Some(h) == light.color_hex.as_deref());
             let new_idx = match (current_idx, warmer) {
                 (Some(i), true) => (i + 1).min(temps.len() - 1),

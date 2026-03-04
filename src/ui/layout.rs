@@ -162,9 +162,13 @@ fn draw_light_list(frame: &mut Frame, area: Rect, app: &App, theme: &FrostTheme)
                 (".", theme.dimmed, "OFF ", theme.bright_red)
             };
 
-            // Name (max 25 chars)
-            let name = if light.name.len() > 25 {
-                format!("{}...", &light.name[..22])
+            // Name (max 25 chars, safe for multi-byte UTF-8)
+            let name = if light.name.chars().count() > 25 {
+                let end = light.name
+                    .char_indices()
+                    .nth(22)
+                    .map_or(light.name.len(), |(i, _)| i);
+                format!("{}...", &light.name[..end])
             } else {
                 format!("{:25}", light.name)
             };

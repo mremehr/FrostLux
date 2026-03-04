@@ -77,6 +77,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     let mut last_theme_check = Instant::now();
     let theme_auto = app.config.ui.theme.eq_ignore_ascii_case("auto");
     let mut last_marker_theme = alacritty_marker_theme_is_light();
+    // Debounce: read the theme marker file at most twice per second.
+    let mut last_marker_check = Instant::now();
 
     if theme_auto {
         if let Some(is_light) = last_marker_theme {
@@ -97,7 +99,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         // - Fast path: react to Alacritty marker changes in near real-time.
         // - Fallback: periodic auto detection when marker file is missing.
         if theme_auto {
-            let marker_theme = alacritty_marker_theme_is_light();
+            // Only hit the filesystem twice per second.
+            let marker_theme = if last_marker_check.elapsed() >= Duration::from_millis(500) {
+                last_marker_check = Instant::now();
+                alacritty_marker_theme_is_light()
+            } else {
+                last_marker_theme
+            };
 
             if marker_theme != last_marker_theme {
                 if let Some(is_light) = marker_theme {
