@@ -10,7 +10,6 @@ use std::time::Duration;
 const COAP_PORT: u16 = 5684;
 const BUF_SIZE: usize = 4096;
 const TIMEOUT_SECS: u64 = 3;
-const PARALLEL_POOL_SIZE: usize = 4;
 
 /// Light info parsed from Trådfri gateway response
 #[derive(Debug, Clone, Deserialize)]
@@ -405,79 +404,48 @@ impl SharedTradfriClient {
     }
 }
 
-/// Connect to the gateway, fetch all lights in parallel, and return both the
-/// light list and a ready-to-use persistent client — all in one operation.
+/// Connect to the gateway, fetch all lights, and return both the light list and
+/// a ready-to-use persistent client — all over a single DTLS connection.
 ///
-/// Step 1: primary connection fetches the device ID list.
-/// Step 2: IDs are split across up to PARALLEL_POOL_SIZE worker threads.
-/// Step 3: the primary connection is reused as the persistent client,
-///         saving one DTLS handshake compared to opening a fresh connection.
+/// One handshake, serial device requests. The Trådfri gateway handles concurrent
+/// DTLS sessions poorly, so a single connection is faster in practice than a
+/// parallel pool.
 pub fn connect_and_fetch_lights(
     host: &str,
     identity: &str,
     psk: &str,
 ) -> Result<(Vec<LightInfo>, SharedTradfriClient)> {
-    // Step 1: primary connection — becomes the persistent client after fetching IDs.
-    let mut primary = DtlsCoap::new(host, identity, psk)
+    let mut coap = DtlsCoap::new(host, identity, psk)
         .context("Failed to connect to Trådfri gateway")?;
-    let payload = primary.get("15001")?;
+
+    let payload = coap.get("15001")?;
     let ids: Vec<u64> = serde_json::from_slice(&payload)
         .context("Failed to parse device ID list")?;
 
-    // Step 2: parallel workers fetch each device's details.
-    let lights = if ids.is_empty() {
-        Vec::new()
-    } else {
-        let pool_size = PARALLEL_POOL_SIZE.min(ids.len());
-        let chunk_size = ids.len().div_ceil(pool_size);
-        let chunks: Vec<Vec<u64>> = ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let mut lights = Vec::new();
+    for id in ids {
+        let Ok(payload) = coap.get(&format!("15001/{}", id)) else {
+            continue;
+        };
+        let Ok(device) = serde_json::from_slice::<TradfriDevice>(&payload) else {
+            continue;
+        };
+        let Some(bulb) = device.bulbs.as_ref().and_then(|b| b.first()) else {
+            continue;
+        };
+        lights.push(LightInfo {
+            id: device.id,
+            name: device.name,
+            on: bulb.on.unwrap_or(0) == 1,
+            brightness: bulb.brightness.unwrap_or(0),
+            color_hex: bulb.color_hex.clone(),
+            reachable: device.reachable.unwrap_or(0) == 1,
+        });
+    }
 
-        let (tx, rx) = std::sync::mpsc::channel::<Vec<LightInfo>>();
-
-        for chunk in chunks {
-            let tx = tx.clone();
-            let host = host.to_string();
-            let identity = identity.to_string();
-            let psk = psk.to_string();
-
-            std::thread::spawn(move || {
-                let mut batch = Vec::new();
-                if let Ok(mut conn) = DtlsCoap::new(&host, &identity, &psk) {
-                    for id in chunk {
-                        let Ok(payload) = conn.get(&format!("15001/{}", id)) else {
-                            continue;
-                        };
-                        let Ok(device) = serde_json::from_slice::<TradfriDevice>(&payload) else {
-                            continue;
-                        };
-                        let Some(bulb) = device.bulbs.as_ref().and_then(|b| b.first()) else {
-                            continue;
-                        };
-                        batch.push(LightInfo {
-                            id: device.id,
-                            name: device.name,
-                            on: bulb.on.unwrap_or(0) == 1,
-                            brightness: bulb.brightness.unwrap_or(0),
-                            color_hex: bulb.color_hex.clone(),
-                            reachable: device.reachable.unwrap_or(0) == 1,
-                        });
-                    }
-                }
-                let _ = tx.send(batch);
-            });
-        }
-
-        drop(tx);
-        let mut lights = Vec::new();
-        while let Ok(batch) = rx.recv() {
-            lights.extend(batch);
-        }
-        lights
-    };
-
-    // Step 3: wrap the primary connection as the persistent client — no extra handshake.
+    // Reuse the same connection as the persistent client — no extra handshake.
     let client = SharedTradfriClient {
-        inner: Arc::new(Mutex::new(TradfriClient::from_coap(primary))),
+        inner: Arc::new(Mutex::new(TradfriClient::from_coap(coap))),
     };
 
     Ok((lights, client))
