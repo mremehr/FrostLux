@@ -25,9 +25,6 @@ pub struct LightInfo {
 /// Raw Trådfri device JSON (keys are CoAP resource numbers)
 #[derive(Debug, Deserialize)]
 struct TradfriDevice {
-    /// Device info
-    #[serde(rename = "3")]
-    _info: Option<serde_json::Value>,
     /// Light list (array of bulbs)
     #[serde(rename = "3311")]
     bulbs: Option<Vec<TradfriLightBulb>>,
@@ -40,9 +37,6 @@ struct TradfriDevice {
     /// Reachable (1 = true, 0 = false)
     #[serde(rename = "9019")]
     reachable: Option<u32>,
-    /// Device type
-    #[serde(rename = "5750", default)]
-    _device_type: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,7 +156,9 @@ impl DtlsCoap {
             .to_bytes()
             .context("Failed to serialize CoAP request")?;
 
-        // Retry once with a fresh DTLS session if the persistent stream breaks.
+        // Retry once (2 attempts total) with a fresh DTLS session if the
+        // persistent stream breaks mid-request (e.g. gateway timeout).
+        // A third attempt is rarely useful and doubles the user-visible delay.
         let mut last_err = None;
         for _ in 0..2 {
             self.ensure_connected()?;
@@ -425,9 +421,11 @@ pub fn connect_and_fetch_lights(
     let mut lights = Vec::new();
     for id in ids {
         let Ok(payload) = coap.get(&format!("15001/{}", id)) else {
+            tracing::warn!("skipped device {}: GET failed", id);
             continue;
         };
         let Ok(device) = serde_json::from_slice::<TradfriDevice>(&payload) else {
+            tracing::warn!("skipped device {}: JSON parse failed", id);
             continue;
         };
         let Some(bulb) = device.bulbs.as_ref().and_then(|b| b.first()) else {

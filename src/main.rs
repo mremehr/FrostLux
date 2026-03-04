@@ -18,6 +18,11 @@ use std::time::{Duration, Instant};
 use app::{load_config, App, Scene};
 use ui::{alacritty_marker_theme_is_light, frost_theme_from_config};
 
+/// How often to check the Alacritty theme marker file (fast path).
+const MARKER_CHECK_INTERVAL: Duration = Duration::from_millis(500);
+/// Fallback re-detection interval when the marker file is absent.
+const THEME_FALLBACK_INTERVAL: Duration = Duration::from_millis(750);
+
 fn main() -> Result<()> {
     // Parse CLI args
     let args: Vec<String> = std::env::args().collect();
@@ -100,7 +105,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         // - Fallback: periodic auto detection when marker file is missing.
         if theme_auto {
             // Only hit the filesystem twice per second.
-            let marker_theme = if last_marker_check.elapsed() >= Duration::from_millis(500) {
+            let marker_theme = if last_marker_check.elapsed() >= MARKER_CHECK_INTERVAL {
                 last_marker_check = Instant::now();
                 alacritty_marker_theme_is_light()
             } else {
@@ -116,7 +121,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                 last_marker_theme = marker_theme;
             }
 
-            if marker_theme.is_none() && last_theme_check.elapsed() >= Duration::from_millis(750) {
+            if marker_theme.is_none() && last_theme_check.elapsed() >= THEME_FALLBACK_INTERVAL {
                 theme = frost_theme_from_config(&app.config.ui.theme);
                 last_theme_check = Instant::now();
             }

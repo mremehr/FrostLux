@@ -9,6 +9,12 @@ use ratatui::{
 use crate::app::App;
 use crate::ui::theme::FrostTheme;
 
+const STATUS_POPUP_MAX_WIDTH: u16 = 50;
+const STATUS_POPUP_HEIGHT: u16 = 3;
+const HELP_POPUP_WIDTH: u16 = 50;
+const HELP_POPUP_HEIGHT: u16 = 18;
+const BRIGHTNESS_BAR_SEGMENTS: usize = 10;
+
 // Compact layered snowflake: keeps the frosted look but fits tighter terminals.
 const SNOWFLAKE_OUTER: [&str; 5] = [
     "  ·   ✶   ·  ",
@@ -34,6 +40,20 @@ const SNOWFLAKE_CORE: [&str; 5] = [
     "      ✦      ",
 ];
 
+/// Truncate `name` to `max_chars` display columns, appending "..." if needed.
+/// Pads with spaces to `max_chars` when the name is short — safe for multi-byte UTF-8.
+fn truncate_name(name: &str, max_chars: usize) -> String {
+    if name.chars().count() > max_chars {
+        let end = name
+            .char_indices()
+            .nth(max_chars - 3)
+            .map_or(name.len(), |(i, _)| i);
+        format!("{}...", &name[..end])
+    } else {
+        format!("{:width$}", name, width = max_chars)
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &App, theme: &FrostTheme) {
     let area = frame.area();
 
@@ -48,7 +68,7 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &FrostTheme) {
 
     draw_header(frame, chunks[0], app, theme);
     draw_light_list(frame, chunks[1], app, theme);
-    draw_footer(frame, chunks[2], app, theme);
+    draw_footer(frame, chunks[2], theme);
 
     // Status message overlay
     if let Some(msg) = app.current_status() {
@@ -78,7 +98,9 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, theme: &FrostTheme) {
             let mid = SNOWFLAKE_MID[i];
             let core = SNOWFLAKE_CORE[i];
 
-            // Combine layers character by character
+            // Layer priority (highest wins): core > mid > outer.
+            // Core renders the bright crystal center; mid the ice-blue arms;
+            // outer the soft ambient glow dots.
             for ((o, m), c) in outer.chars().zip(mid.chars()).zip(core.chars()) {
                 let ch = if c != ' ' {
                     c  // Core layer (brightest)
@@ -163,20 +185,12 @@ fn draw_light_list(frame: &mut Frame, area: Rect, app: &App, theme: &FrostTheme)
             };
 
             // Name (max 25 chars, safe for multi-byte UTF-8)
-            let name = if light.name.chars().count() > 25 {
-                let end = light.name
-                    .char_indices()
-                    .nth(22)
-                    .map_or(light.name.len(), |(i, _)| i);
-                format!("{}...", &light.name[..end])
-            } else {
-                format!("{:25}", light.name)
-            };
+            let name = truncate_name(&light.name, 25);
 
-            // Brightness bar (10 segments)
+            // Brightness bar
             let pct = light.brightness_percent() as usize;
-            let filled = pct / 10;
-            let bar: String = "█".repeat(filled) + &"░".repeat(10 - filled);
+            let filled = pct / BRIGHTNESS_BAR_SEGMENTS;
+            let bar: String = "█".repeat(filled) + &"░".repeat(BRIGHTNESS_BAR_SEGMENTS - filled);
 
             // Color temp indicator
             let temp_label = light.color_temp_label();
@@ -218,7 +232,7 @@ fn draw_light_list(frame: &mut Frame, area: Rect, app: &App, theme: &FrostTheme)
     frame.render_widget(list, area);
 }
 
-fn draw_footer(frame: &mut Frame, area: Rect, _app: &App, theme: &FrostTheme) {
+fn draw_footer(frame: &mut Frame, area: Rect, theme: &FrostTheme) {
     let sep = Span::styled("  ", Style::default());
 
     let line1 = Line::from(vec![
@@ -277,8 +291,8 @@ fn draw_footer(frame: &mut Frame, area: Rect, _app: &App, theme: &FrostTheme) {
 }
 
 fn draw_status_popup(frame: &mut Frame, area: Rect, msg: &str, theme: &FrostTheme) {
-    let width = (msg.len() + 4).min(50) as u16;
-    let height = 3;
+    let width = (msg.len() + 4).min(STATUS_POPUP_MAX_WIDTH as usize) as u16;
+    let height = STATUS_POPUP_HEIGHT;
     let x = area.width.saturating_sub(width) / 2;
     let y = area.height.saturating_sub(height) / 2;
     let popup_area = Rect::new(x, y, width, height);
@@ -303,8 +317,8 @@ fn draw_status_popup(frame: &mut Frame, area: Rect, msg: &str, theme: &FrostThem
 }
 
 fn draw_help_popup(frame: &mut Frame, area: Rect, theme: &FrostTheme) {
-    let width = 50;
-    let height = 18;
+    let width = HELP_POPUP_WIDTH;
+    let height = HELP_POPUP_HEIGHT;
     let x = area.width.saturating_sub(width) / 2;
     let y = area.height.saturating_sub(height) / 2;
     let popup_area = Rect::new(x, y, width, height);
