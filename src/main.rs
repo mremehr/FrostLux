@@ -47,15 +47,15 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    // Create app (connects to gateway via DTLS)
-    let mut app = App::new(config).context("Failed to initialize FrostLux")?;
-
-    // Terminal setup
+    // Terminal setup — done before App::new so the TUI appears instantly
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, SetTitle("FrostLux"))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    // Create app — spawns a background thread for DTLS connect + parallel fetch
+    let mut app = App::new(config);
 
     let result = run_app(&mut terminal, &mut app);
 
@@ -82,12 +82,6 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         if let Some(is_light) = last_marker_theme {
             theme = frost_theme_from_config(if is_light { "light" } else { "dark" });
         }
-    }
-
-    // Initial fetch (blocking but necessary)
-    app.set_status("Connecting to gateway...");
-    if let Err(e) = app.refresh_lights() {
-        app.set_status(&format!("Connection failed: {}", e));
     }
 
     loop {
@@ -207,13 +201,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                         let _ = app.apply_scene(Scene::GoodMorning);
                     }
 
-                    // Force refresh
+                    // Force refresh (non-blocking)
                     KeyCode::Char('R') => {
-                        if let Err(e) = app.refresh_lights() {
-                            app.set_status(&format!("Refresh failed: {}", e));
-                        } else {
-                            app.set_status("Refreshed");
-                        }
+                        app.start_background_refresh();
+                        app.set_status("Refreshing...");
                     }
 
                     // Help

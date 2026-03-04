@@ -47,9 +47,17 @@ impl Light {
     }
 }
 
-/// Fetch all lights from the gateway
+/// Fetch all lights from the gateway (serial, uses existing connection).
 pub fn fetch_lights(client: &SharedTradfriClient) -> Result<Vec<Light>> {
     let infos = client.list_lights()?;
+    let mut lights: Vec<Light> = infos.into_iter().map(Light::from).collect();
+    lights.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(lights)
+}
+
+/// Fetch all lights in parallel (used for initial load — opens fresh connections).
+pub fn fetch_lights_fast(host: &str, identity: &str, psk: &str) -> Result<Vec<Light>> {
+    let infos = crate::coap::fetch_lights_parallel(host, identity, psk)?;
     let mut lights: Vec<Light> = infos.into_iter().map(Light::from).collect();
     lights.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(lights)

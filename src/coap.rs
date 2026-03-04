@@ -9,7 +9,8 @@ use std::time::Duration;
 
 const COAP_PORT: u16 = 5684;
 const BUF_SIZE: usize = 4096;
-const TIMEOUT_SECS: u64 = 10;
+const TIMEOUT_SECS: u64 = 3;
+const PARALLEL_POOL_SIZE: usize = 4;
 
 /// Light info parsed from Trådfri gateway response
 #[derive(Debug, Clone, Deserialize)]
@@ -401,4 +402,71 @@ impl SharedTradfriClient {
         self.lock_client()?
             .apply_scene_to_light(id, on, brightness, color_hex)
     }
+}
+
+/// Fetch all lights in parallel using a pool of DTLS connections.
+///
+/// Step 1: one connection fetches the full device ID list.
+/// Step 2: IDs are split across up to PARALLEL_POOL_SIZE worker threads,
+///         each with its own DTLS connection, fetching concurrently.
+pub fn fetch_lights_parallel(host: &str, identity: &str, psk: &str) -> Result<Vec<LightInfo>> {
+    // Get device ID list with a single short-lived connection.
+    let ids: Vec<u64> = {
+        let mut primary = DtlsCoap::new(host, identity, psk)
+            .context("Failed to connect to Trådfri gateway")?;
+        let payload = primary.get("15001")?;
+        serde_json::from_slice(&payload).context("Failed to parse device ID list")?
+    };
+
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let pool_size = PARALLEL_POOL_SIZE.min(ids.len());
+    let chunk_size = (ids.len() + pool_size - 1) / pool_size;
+    let chunks: Vec<Vec<u64>> = ids.chunks(chunk_size).map(|c| c.to_vec()).collect();
+
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<LightInfo>>();
+
+    for chunk in chunks {
+        let tx = tx.clone();
+        let host = host.to_string();
+        let identity = identity.to_string();
+        let psk = psk.to_string();
+
+        std::thread::spawn(move || {
+            let mut batch = Vec::new();
+            if let Ok(mut conn) = DtlsCoap::new(&host, &identity, &psk) {
+                for id in chunk {
+                    let Ok(payload) = conn.get(&format!("15001/{}", id)) else {
+                        continue;
+                    };
+                    let Ok(device) = serde_json::from_slice::<TradfriDevice>(&payload) else {
+                        continue;
+                    };
+                    let Some(bulb) = device.bulbs.as_ref().and_then(|b| b.first()) else {
+                        continue;
+                    };
+                    batch.push(LightInfo {
+                        id: device.id,
+                        name: device.name,
+                        on: bulb.on.unwrap_or(0) == 1,
+                        brightness: bulb.brightness.unwrap_or(0),
+                        color_hex: bulb.color_hex.clone(),
+                        reachable: device.reachable.unwrap_or(0) == 1,
+                    });
+                }
+            }
+            let _ = tx.send(batch);
+        });
+    }
+
+    // Drop original sender so the channel closes when all workers finish.
+    drop(tx);
+
+    let mut lights = Vec::new();
+    while let Ok(batch) = rx.recv() {
+        lights.extend(batch);
+    }
+    Ok(lights)
 }
