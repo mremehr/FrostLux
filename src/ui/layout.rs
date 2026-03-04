@@ -296,6 +296,7 @@ fn draw_status_popup(frame: &mut Frame, area: Rect, msg: &str, theme: &FrostThem
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.cold_green)),
     )
+    .style(theme.popup())
     .alignment(ratatui::layout::Alignment::Center);
 
     frame.render_widget(popup, popup_area);
@@ -336,7 +337,7 @@ fn draw_help_popup(frame: &mut Frame, area: Rect, theme: &FrostTheme) {
                 .borders(Borders::ALL)
                 .border_style(theme.border()),
         )
-        .style(theme.normal());
+        .style(theme.popup());
 
     frame.render_widget(help, popup_area);
 }

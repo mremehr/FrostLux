@@ -61,6 +61,10 @@ impl FrostTheme {
     }
 
     pub fn normal(&self) -> Style {
+        Style::default().fg(self.foreground).bg(Color::Reset)
+    }
+
+    pub fn popup(&self) -> Style {
         Style::default().fg(self.foreground).bg(self.background)
     }
 
